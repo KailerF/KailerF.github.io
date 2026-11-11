@@ -1,0 +1,179 @@
+
+name: Portfolio Live Audit
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/portfolio-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install testing tools
+        run: |
+          npm install --no-save playwright lighthouse
+          npx playwright install --with-deps chromium firefox
+          mkdir -p audit-results
+
+      - name: Test live website in two browsers
+        run: |
+          cat > audit.cjs <<'EOF'
+          const { chromium, firefox } = require('playwright');
+          const fs = require('fs');
+          const url = 'https://kailerf.github.io/';
+          const results = [];
+          const sizes = [375, 768, 1280];
+
+          (async () => {
+            for (const [name, engine] of [
+              ['Chromium', chromium],
+              ['Firefox', firefox]
+            ]) {
+              const browser = await engine.launch();
+              for (const width of sizes) {
+                const context = await browser.newContext({
+                  viewport: { width, height: 900 },
+                  reducedMotion: 'reduce'
+                });
+                await context.route('**/*', async route => {
+                  if (route.request().method() !== 'GET') {
+                    await route.abort();
+                  } else {
+                    await route.continue();
+                  }
+                });
+                const page = await context.newPage();
+                const errors = [];
+                const checks = {};
+                page.on('pageerror', e => errors.push(e.message));
+
+                try {
+                  const response = await page.goto(url, {
+                    waitUntil: 'networkidle',
+                    timeout: 60000
+                  });
+                  checks.siteLoads = response.status() === 200;
+                  checks.sections = await page.locator(
+                    '#home,#about,#skills,#projects,#contact'
+                  ).count() === 5;
+
+                  checks.projects = await page.locator(
+                    '.project-card'
+                  ).count() === 3;
+
+                  checks.noHorizontalOverflow = await page.evaluate(
+                    () => document.documentElement.scrollWidth <=
+                          document.documentElement.clientWidth + 1
+                  );
+
+                  checks.skillsTableFits = await page.evaluate(() => {
+                    const table = document.querySelector('table');
+                    const container = document.querySelector('.table-scroll');
+                    return table.getBoundingClientRect().width <=
+                           container.clientWidth + 1;
+                  });
+
+                  checks.imagesLoad = await page.evaluate(async () => {
+                    const images = [...document.images];
+                    const values = await Promise.all(
+                      images.map(img => img.decode().then(
+                        () => img.naturalWidth > 0,
+                        () => false
+                      ))
+                    );
+                    return values.every(Boolean);
+                  });
+
+                  if (width < 1020) {
+                    await page.locator('#menu-button').click();
+                    checks.mobileMenu = await page.locator(
+                      '#menu-button'
+                    ).getAttribute('aria-expanded') === 'true';
+                    await page.keyboard.press('Escape');
+                    checks.escapeClosesMenu = await page.locator(
+                      '#menu-button'
+                    ).getAttribute('aria-expanded') === 'false';
+                  } else {
+                    checks.desktopNavigation = await page.locator(
+                      '#primary-navigation'
+                    ).isVisible();
+                  }
+
+                  await page.locator('#theme-button').click();
+                  checks.themeSwitch = await page.locator(
+                    'html'
+                  ).getAttribute('data-theme') === 'light';
+
+                  await page.locator('#validate-button').click();
+                  checks.formValidation = await page.locator(
+                    '#full-name'
+                  ).getAttribute('aria-invalid') === 'true';
+
+                  checks.noJavaScriptErrors = errors.length === 0;
+
+                  await page.screenshot({
+                    path: `audit-results/${name}-${width}.jpg`,
+                    fullPage: true,
+                    type: 'jpeg'
+                  });
+                } catch (e) {
+                  checks.testExecution = false;
+                  errors.push(e.message);
+                }
+
+                results.push({ browser: name, width, checks, errors });
+                await context.close();
+              }
+              await browser.close();
+            }
+
+            fs.writeFileSync(
+              'audit-results/browser-results.json',
+              JSON.stringify(results, null, 2)
+            );
+            const failed = results.some(r =>
+              r.errors.length ||
+              Object.values(r.checks).some(v => !v)
+            );
+            if (failed) process.exitCode = 1;
+          })().catch(e => {
+            console.error(e);
+            process.exitCode = 1;
+          });
+          EOF
+          node audit.cjs
+
+      - name: Lighthouse mobile and desktop
+        if: always()
+        run: |
+          export CHROME_PATH="$(node -e "console.log(require('playwright').chromium.executablePath())")"
+          npx lighthouse https://kailerf.github.io/ \
+            --chrome-flags="--headless --no-sandbox" \
+            --output=html --output=json \
+            --output-path=./audit-results/lighthouse-mobile \
+            --quiet
+          npx lighthouse https://kailerf.github.io/ \
+            --preset=desktop \
+            --chrome-flags="--headless --no-sandbox" \
+            --output=html --output=json \
+            --output-path=./audit-results/lighthouse-desktop \
+            --quiet
+
+      - name: Save audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portfolio-audit-results
+          path: audit-results/
+          if-no-files-found: warn
