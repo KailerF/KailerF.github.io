@@ -1,0 +1,55 @@
+[
+  {
+    "browser": "firefox",
+    "width": 375,
+    "checks": {
+      "http200": true,
+      "fiveSections": true,
+      "threeProjects": true,
+      "noHorizontalOverflow": true,
+      "skillsTableFits": true,
+      "imagesLoad": true,
+      "menuOpens": true,
+      "menuEscape": true,
+      "themeSwitch": true,
+      "formValidation": true,
+      "noJsErrors": true
+    },
+    "errors": []
+  },
+  {
+    "browser": "firefox",
+    "width": 768,
+    "checks": {
+      "http200": true,
+      "fiveSections": true,
+      "threeProjects": true,
+      "noHorizontalOverflow": true,
+      "skillsTableFits": true,
+      "imagesLoad": true,
+      "menuOpens": true,
+      "menuEscape": true,
+      "themeSwitch": true,
+      "formValidation": true,
+      "noJsErrors": true
+    },
+    "errors": []
+  },
+  {
+    "browser": "firefox",
+    "width": 1280,
+    "checks": {
+      "http200": true,
+      "fiveSections": true,
+      "threeProjects": true,
+      "noHorizontalOverflow": true,
+      "skillsTableFits": true,
+      "imagesLoad": true,
+      "desktopNavVisible": true,
+      "themeSwitch": true,
+      "formValidation": true,
+      "noJsErrors": true
+    },
+    "errors": []
+  }
+]
