@@ -24,7 +24,7 @@ The public repository is on the `main` branch. GitHub Pages deployment is shown 
 2. **About Me:** Education, banking IT support experience, and professional interests
 3. **Skills:** Technical knowledge and experience organized in an accessible HTML table
 4. **Projects:** Three project cards generated from a JavaScript array of objects
-5. **Contact:** Front-end demonstration form with validation and accessible feedback
+5. **Contact:** Test validation only” checks entries locally and displays feedback without sending data. “Send message” submits entries to FormSubmit. Email delivery requires recipient activation and has not yet been verified.
 
 ## Featured projects
 
@@ -66,10 +66,10 @@ KailerF.github.io/
 │   └── project3.jpg
 ├── wireframes/
 │   ├── low\_fidelity.jpg
-│   └── high\_fidelity.jpg
+│   └── high\fidelity.jpg
 └── documentation/
     ├── performance\_report.pdf
-    └── usability\_testing.pdf
+    └── Usability\Review.pdf
 ```
 
 All submitted image assets use JPEG format with the `.jpg` extension.
