@@ -1,0 +1,237 @@
+
+name: Portfolio Two-Browser Verification
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/portfolio-two-browser.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.browser }} verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Playwright and selected browser
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps "${{ matrix.browser }}"
+
+      - name: Check published website
+        env:
+          TEST_BROWSER: ${{ matrix.browser }}
+        run: |
+          cat > verify.cjs <<'JS'
+          const { chromium, firefox } = require('playwright');
+          const fs = require('fs');
+
+          const browserName = process.env.TEST_BROWSER;
+          const engine = browserName === 'firefox' ? firefox : chromium;
+          const widths = [375, 768, 1280];
+          const results = [];
+
+          const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+          const deadline = (promise, ms, label) => Promise.race([
+            promise,
+            sleep(ms).then(() => {
+              throw new Error(`${label} timed out after ${ms}ms`);
+            })
+          ]);
+
+          (async () => {
+            fs.mkdirSync('audit-results', { recursive: true });
+
+            const browser = await engine.launch({ headless: true });
+
+            try {
+              for (const width of widths) {
+                console.log(`START ${browserName} ${width}px`);
+
+                const context = await browser.newContext({
+                  viewport: { width, height: 900 },
+                  reducedMotion: 'reduce'
+                });
+
+                const page = await context.newPage();
+                page.setDefaultTimeout(6000);
+
+                const checks = {};
+                const errors = [];
+
+                page.on('pageerror', error => errors.push(error.message));
+
+                await context.route('**/*', route =>
+                  route.request().method() === 'GET'
+                    ? route.continue()
+                    : route.abort()
+                );
+
+                try {
+                  const response = await deadline(
+                    page.goto('https://kailerf.github.io/', {
+                      waitUntil: 'domcontentloaded',
+                      timeout: 15000
+                    }),
+                    17000,
+                    'navigation'
+                  );
+
+                  checks.http200 = response?.status() === 200;
+
+                  checks.fiveSections = await page.locator(
+                    '#home,#about,#skills,#projects,#contact'
+                  ).count() === 5;
+
+                  checks.threeProjects = await page.locator(
+                    '.project-card'
+                  ).count() === 3;
+
+                  checks.noHorizontalOverflow = await page.evaluate(() =>
+                    document.documentElement.scrollWidth <=
+                    document.documentElement.clientWidth + 2
+                  );
+
+                  checks.skillsTableFits = await page.evaluate(() => {
+                    const table = document.querySelector('table');
+                    const container = document.querySelector('.table-scroll');
+
+                    return !!(
+                      table &&
+                      container &&
+                      table.getBoundingClientRect().width <=
+                      container.clientWidth + 2
+                    );
+                  });
+
+                  await page.locator('img').evaluateAll(images =>
+                    images.forEach(img => {
+                      img.loading = 'eager';
+                    })
+                  );
+
+                  checks.imagesLoad = await deadline(
+                    page.evaluate(async () => {
+                      const images = [...document.images];
+
+                      const status = await Promise.all(
+                        images.map(img => Promise.race([
+                          img.decode().then(
+                            () => img.naturalWidth > 0,
+                            () => false
+                          ),
+                          new Promise(resolve =>
+                            setTimeout(() => resolve(false), 5000)
+                          )
+                        ]))
+                      );
+
+                      return images.length >= 4 && status.every(Boolean);
+                    }),
+                    7000,
+                    'image loading'
+                  );
+
+                  if (width < 1020) {
+                    await page.locator('#menu-button').click();
+
+                    checks.menuOpens = await page.locator(
+                      '#menu-button'
+                    ).getAttribute('aria-expanded') === 'true';
+
+                    await page.keyboard.press('Escape');
+
+                    checks.menuEscape = await page.locator(
+                      '#menu-button'
+                    ).getAttribute('aria-expanded') === 'false';
+                  } else {
+                    checks.desktopNavVisible = await page.locator(
+                      '#primary-navigation'
+                    ).isVisible();
+                  }
+
+                  await page.locator('#theme-button').click();
+
+                  checks.themeSwitch = await page.locator(
+                    'html'
+                  ).getAttribute('data-theme') === 'light';
+
+                  await page.locator('#validate-button').click();
+
+                  checks.formValidation = await page.locator(
+                    '#full-name'
+                  ).getAttribute('aria-invalid') === 'true';
+
+                  checks.noJsErrors = errors.length === 0;
+
+                  await page.screenshot({
+                    path: `audit-results/${browserName}-${width}.jpg`,
+                    type: 'jpeg',
+                    fullPage: true,
+                    timeout: 12000
+                  });
+
+                } catch (error) {
+                  checks.execution = false;
+                  errors.push(error.message);
+                }
+
+                results.push({
+                  browser: browserName,
+                  width,
+                  checks,
+                  errors
+                });
+
+                console.log(
+                  `DONE ${browserName} ${width}px ${JSON.stringify(checks)} errors=${JSON.stringify(errors)}`
+                );
+
+                await context.close();
+              }
+            } finally {
+              await browser.close();
+            }
+
+            fs.writeFileSync(
+              `audit-results/${browserName}-results.json`,
+              JSON.stringify(results, null, 2)
+            );
+
+            if (results.some(r =>
+              r.errors.length ||
+              Object.values(r.checks).some(v => !v)
+            )) {
+              process.exitCode = 1;
+            }
+
+          })().catch(error => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          JS
+
+          node verify.cjs
+
+      - name: Save verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: two-browser-${{ matrix.browser }}
+          path: audit-results/
+          if-no-files-found: warn
